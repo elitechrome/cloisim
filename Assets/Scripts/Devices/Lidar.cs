@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using System.Threading;
+using System.Linq;
 using System;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.Rendering;
@@ -48,6 +49,8 @@ namespace SensorDevices
 
 		private bool _startLaserWork = false;
 
+		private static readonly int MinimumHeightForRenderTexture = 5;
+		private int _actualRenderTextureHeight = 0;
 		private RTHandle _rtHandle = null;
 		private ParallelOptions _parallelOptions = null;
 
@@ -193,8 +196,10 @@ namespace SensorDevices
 			_laserCam.depthTextureMode = DepthTextureMode.Depth;
 			_laserCam.renderingPath = RenderingPath.Forward;
 
+			_actualRenderTextureHeight = Mathf.CeilToInt(LaserCameraVFov / _laserAngleResolution.V);
 			var renderTextureWidth = Mathf.CeilToInt(LaserCameraHFov / _laserAngleResolution.H);
-			var renderTextureHeight = Mathf.CeilToInt(LaserCameraVFov / _laserAngleResolution.V);
+			var renderTextureHeight = Mathf.Max(MinimumHeightForRenderTexture, _actualRenderTextureHeight);
+
 			// Debug.Log($"SetupLaserCamera: {LaserCameraHFov} {_laserAngleResolution.H} {LaserCameraVFov} {_laserAngleResolution.V}, {renderTextureWidth} {renderTextureHeight}");
 
 			RTHandles.SetHardwareDynamicResolutionState(false);
@@ -203,7 +208,7 @@ namespace SensorDevices
 				width: renderTextureWidth,
 				height: renderTextureHeight,
 				slices: 1,
-				depthBufferBits: DepthBits.None,
+				depthBufferBits: DepthBits.Depth24,
 				colorFormat: GraphicsFormat.R32_SFloat,
 				filterMode: FilterMode.Point,
 				wrapMode: TextureWrapMode.Clamp,
@@ -444,6 +449,18 @@ namespace SensorDevices
 		{
 			const int BufferUnitSize = sizeof(double);
 
+			int[] GetValidSampleLines(in int actualHeight)
+			{
+				switch (actualHeight)
+				{
+					case 1: return new int[] { 2 };
+					case 2: return new int[] { 1, 3 };
+					case 3: return new int[] { 1, 2, 3 };
+					case 4: return new int[] { 0, 1, 3, 4 };
+					default: return new int[] { 0, 1, 2, 3, 4 };
+				}
+			}
+
 			var laserSamplesH = (int)horizontal.samples;
 			var laserStartAngleH = horizontal.angle.min;
 			var laserEndAngleH = horizontal.angle.max;
@@ -458,6 +475,11 @@ namespace SensorDevices
 			var isMaxAngleDominant = Mathf.Abs(vertical.angle.max) > Mathf.Abs(vertical.angle.min);
 			var laserSamplesVStart = isMaxAngleDominant ? (laserSamplesVTotal - laserSamplesV) : 0;
 			var laserSamplesVEnd = isMaxAngleDominant ? laserSamplesVTotal : laserSamplesV;
+
+			var vSampleLines =
+				(_actualRenderTextureHeight < MinimumHeightForRenderTexture) ?
+					GetValidSampleLines(_actualRenderTextureHeight) :
+					Enumerable.Range(laserSamplesVStart, laserSamplesVEnd - laserSamplesVStart).ToArray();
 
 			// Debug.Log($"laserSamplesVTotal: {laserSamplesVTotal}, " +
 			// 			$"isMaxAngleDominant: {isMaxAngleDominant}, " +
@@ -501,7 +523,7 @@ namespace SensorDevices
 						}
 
 						var dstSampleIndexV = 0;
-						for (var srcSampleIndexV = laserSamplesVStart; srcSampleIndexV < laserSamplesVEnd; srcSampleIndexV++)
+						foreach (var srcSampleIndexV in vSampleLines)
 						{
 							var srcBufferOffset = 0;
 							var dstBufferOffset = 0;

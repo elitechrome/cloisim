@@ -9,6 +9,7 @@ using UnityEngine.Rendering.Universal;
 using UnityEngine.Experimental.Rendering;
 using Unity.Collections;
 using System.Threading.Tasks;
+using System;
 using messages = cloisim.msgs;
 
 namespace SensorDevices
@@ -107,6 +108,7 @@ namespace SensorDevices
 			{
 				_kernelIndex = _computeShader.FindKernel("CSScaleDepthBuffer");
 
+				_computeShader.SetFloat("_DepthMax", (float)_camParam.clip.near);
 				_computeShader.SetFloat("_DepthMax", (float)_camParam.clip.far);
 				_computeShader.SetInt("_Width", width);
 				_computeShader.SetInt("_UnitSize", _imageDepth);
@@ -174,9 +176,11 @@ namespace SensorDevices
 				_computeShader.SetBuffer(_kernelIndex, "_Input", computeBufferSrc);
 				computeBufferSrc.SetData(readbackData);
 
-				var computeBufferDst = new ComputeBuffer(_computedBufferOutput.Length, sizeof(byte));
+				// var computeBufferDst = new ComputeBuffer(_computedBufferOutput.Length, sizeof(byte));
+				var computeBufferDst = new ComputeBuffer(_computedBufferOutput.Length / 4, sizeof(uint));
 				_computeShader.SetBuffer(_kernelIndex, "_Output", computeBufferDst);
-				_computeShader.Dispatch(_kernelIndex, _threadGroupX + 1, _threadGroupY + 1, 1);
+				// _computeShader.Dispatch(_kernelIndex, _threadGroupX + 1, _threadGroupY + 1, 1);
+				_computeShader.Dispatch(_kernelIndex, _threadGroupX, _threadGroupY, 1);
 				computeBufferDst.GetData(_computedBufferOutput);
 
 				computeBufferSrc.Release();
@@ -193,10 +197,24 @@ namespace SensorDevices
 							var dataIndex = bufferIndex * _imageDepth;
 							var outputGroupIndex = bufferIndex * (int)OutputMaxUnitSize;
 
-							for (var j = 0; j < _imageDepth; j++)
+							// for (var j = 0; j < _imageDepth; j++)
+							// {
+							// 	var outputIndex = outputGroupIndex + j;
+							// 	imageStamped.Image.Data[dataIndex + j] = _computedBufferOutput[outputIndex];
+							// }
+							if (_imageDepth == 4)
 							{
-								var outputIndex = outputGroupIndex + j;
-								imageStamped.Image.Data[dataIndex + j] = _computedBufferOutput[outputIndex];
+								var value = BitConverter.ToSingle(_computedBufferOutput, outputGroupIndex);
+								var bytes = BitConverter.GetBytes(value);
+								Buffer.BlockCopy(bytes, 0, imageStamped.Image.Data, dataIndex, 4);
+							}
+							else
+							{
+								for (var j = 0; j < _imageDepth; j++)
+								{
+									var outputIndex = outputGroupIndex + j;
+									imageStamped.Image.Data[dataIndex + j] = _computedBufferOutput[outputIndex];
+								}
 							}
 						}
 					});
