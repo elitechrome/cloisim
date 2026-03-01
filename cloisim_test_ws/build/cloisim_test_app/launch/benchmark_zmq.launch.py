@@ -1,1 +1,0 @@
-/home/nav/workspace/cloisim/cloisim/cloisim_test_ws/src/cloisim_test_app/launch/benchmark_zmq.launch.py
